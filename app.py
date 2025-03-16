@@ -11,10 +11,11 @@ import threading
 
 
 app = Flask(__name__)
-CORS(app)
+# CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 outputFrame = None
 lock = threading.Lock()
-trans_res = None
+trans_res = ""
 def process_pdf(input_path, output_path, type, level):
     # 打開PDF
     pdf_document = fitz.open(input_path)
@@ -95,17 +96,44 @@ def process_pdf_route():
     process_pdf(input_path, output_path, type, level)
 
     return send_file(output_path, mimetype='application/pdf')
+"""
+@app.route('/video_feed')
+def video_feed():
+    try:
+        print("TEST")
+        return Response(start(),
+                        mimetype='multipart/x-mixed-replace; boundary=frame')
+    except Exception as e:
+        print(f"Error in video_feed: {e}")
+        return "Error in video_feed", 403
+"""
+
+lock = threading.Lock()
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(start(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    try:
+        with lock:
+            return Response(start(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    except Exception as e:
+        print(f"Error in video_feed: {e}")
+        return {"error": str(e)}, 500
+
+
     
 @app.route('/getRes', methods=['GET'])
 def getRes():
-    return {"msg":trans_res}
+    if trans_res:
+        return {"msg": trans_res}
+    else:
+        return {"msg": "No data available"}
+
+@app.route('/')
+def home():
+    return "Flask server is running! Available endpoints: /process_pdf, /video_feed, /getRes, /handlanRes"
+
 
 if __name__ == '__main__':
     app.config['UPLOAD_FOLDER'] = 'uploads'
-    app.run(port=5000)
+    app.run(host="0.0.0.0", port=5000)
 
