@@ -74,8 +74,8 @@ def start():
     from tensorflow.keras.models import load_model
 
 
-    new_model = load_model('./Model/model1_service1_0924.keras')
-    new_model_order = load_model("./Model/model2_service1_1029.h5")
+    new_model = load_model("./Model/model_hands4.keras")
+    new_model_order = load_model("./Model/model0529-20.h5")
     new_model.summary()
 
 
@@ -133,6 +133,7 @@ def start():
         rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]).flatten() if results.right_hand_landmarks else np.zeros(21*3)
         return np.concatenate([lh, rh]) 
 
+    
     def translate(model_opt):
         # 用零初始化編碼器輸入，形狀是 (1, max_encoder_seq_length, num_encoder_tokens)
         in_encoder = np.zeros((1, max_encoder_seq_length, num_encoder_tokens),dtype='float32')
@@ -178,6 +179,11 @@ def start():
     trans_result = "" # 儲存翻譯後的結果
 
     cap = cv2.VideoCapture(0)
+    
+    if not cap.isOpened():
+        print("❌ 錯誤：無法打開攝影機！")
+        exit(1)
+
 
     with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic: # 設定 MediaPipe 的 Model
         while cap.isOpened():
@@ -227,7 +233,7 @@ def start():
                 url = 'http://localhost:5000/handlanRes'
                 data = {'result': trans_result}  # 將 trans_result 作為結果放入字典中
                 response = requests.post(url, data=data) # 將結果發送到後端的 /handlanRes 路由，作為字典 data 的 POST 請求
-                return data # Problem: 會導致 start 函數終止
+                #return data # Problem: 會導致 start 函數終止
 
                 alarm_set = False # 設為不需翻譯，避免重複翻譯
                 sequence = [] # 清空 sequence 資料
