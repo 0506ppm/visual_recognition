@@ -3,14 +3,14 @@ Flask == 2.3.2
 keras == 2.12.0
 matplotlib == 3.7.1
 matplotlib-inline == 0.1.6
-mediapipe == 0.10.1
+mediapipe == 0.10.5 #原0.10.1
 mss == 9.0.1
 numpy == 1.23.5
 opencv-python == 4.6.0.66
 pandas == 2.0.2
 requests == 2.31.0
 torch == 2.0.1
-tensorflow == 2.12.0
+tensorflow-macos == 2.12.0 #原tensorflow
 APScheduler == 3.10.1
 keyboard
 Flask-Cors == 3.0.10
