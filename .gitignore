@@ -1,6 +1,20 @@
 rec
 /venv
 
+# === 通用忽略規則 ===
+# 忽略模型檔案
+*.keras
+
+# 忽略 Blender 專案檔
+*.blend
+
+# 忽略壓縮檔
+*.zip
+
+# 忽略 Excel 檔
+*.xlsx
+
+*.png
 
 # 忽略特定檔案與資料夾
 AI學習成果v2 (1).xlsx

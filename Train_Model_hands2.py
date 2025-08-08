@@ -1,7 +1,3 @@
-
-
-
-
 import requests
 import os
 import numpy as np
@@ -13,9 +9,7 @@ from PIL import ImageFont, ImageDraw, Image
 
 # 2. 模組需要的字詞 Labels
 def start():
-    actions = np.array(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'check', 'finish', 'give_you',
-                    'good', 'i', 'id_card', 'is', 'money', 'saving_book', 'sign', 'taiwan', 'take', 'ten_thousand', 'yes'])
-
+    actions = np.array(['apply_for', 'invest', 'me', 'passbook', 'what'])
 
     label_map = {label:num for num, label in enumerate(actions)}
     print(label_map)
@@ -74,7 +68,7 @@ def start():
     from tensorflow.keras.models import load_model
 
 
-    new_model = load_model("./Model/model_hands4.keras")
+    new_model = load_model("./Model/j1_noise.keras")
     new_model_order = load_model("./Model/model0529-20.h5")
     new_model.summary()
 
@@ -87,7 +81,7 @@ def start():
     mp_drawing = mp.solutions.drawing_utils # Drawing utilities
 
 
-    colors = [(245,117,16)] * 24
+    colors = [(245,117,16)] * len(actions)
 
     # 在影像中繪製模型預測的機率分布條
     def prob_viz(res, actions, input_frame, colors):

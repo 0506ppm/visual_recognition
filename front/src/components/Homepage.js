@@ -11,7 +11,8 @@ import {BrowserRouter as Router,Switch,Route,Link} from "react-router-dom";
 
 function Homepage(){
     function getAPI(){
-        fetch("http://localhost:5000/mrserver")
+        //fetch("http://localhost:5000/mrserver")
+        console.log("todo")
         
     }
     // const [trans, setTrans] = useState(null);
