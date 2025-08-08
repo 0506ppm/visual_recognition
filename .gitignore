@@ -1,2 +1,22 @@
 rec
 /venv
+
+
+# 忽略特定檔案與資料夾
+AI學習成果v2 (1).xlsx
+__pycache__/midas.cpython-310.pyc
+blend_words/
+hand-gesture-recognition-mediapipe/
+hand_tracker_0428.py
+hdri.png
+make_csv.py
+mediapipe/
+rendered_frames_bank/
+speech_recognition.py
+test.py
+track0616.py
+two_hands動畫.blend
+訓練圖1.png
+模型.blend
+模型.zip
+
