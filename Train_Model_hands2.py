@@ -5,264 +5,314 @@ import time
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
 from PIL import ImageFont, ImageDraw, Image
+import tensorflow as tf
 
+# Create a custom LSTM class that ignores the time_major parameter
+class CustomLSTM(tf.keras.layers.LSTM):
+    def __init__(self, *args, **kwargs):
+        # Remove time_major if it exists
+        kwargs.pop('time_major', None)
+        super().__init__(*args, **kwargs)
 
-# 2. 模組需要的字詞 Labels
+# 定義 SelfAttention 層
+class SelfAttention(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(SelfAttention, self).__init__(**kwargs)
+    
+    def build(self, input_shape):
+        # 正確的 attention 機制實現
+        self.W_q = self.add_weight(
+            shape=(input_shape[-1], input_shape[-1]),
+            initializer='glorot_uniform',
+            trainable=True,
+            name='query_weight'
+        )
+        self.W_k = self.add_weight(
+            shape=(input_shape[-1], input_shape[-1]),
+            initializer='glorot_uniform',
+            trainable=True,
+            name='key_weight'
+        )
+        self.W_v = self.add_weight(
+            shape=(input_shape[-1], input_shape[-1]),
+            initializer='glorot_uniform',
+            trainable=True,
+            name='value_weight'
+        )
+        super(SelfAttention, self).build(input_shape)
+    
+    def call(self, inputs):
+        # 計算 query, key, value
+        query = tf.matmul(inputs, self.W_q)
+        key = tf.matmul(inputs, self.W_k)
+        value = tf.matmul(inputs, self.W_v)
+        
+        # 計算 attention scores
+        attention_scores = tf.matmul(query, key, transpose_b=True)
+        
+        # 縮放
+        d_k = tf.cast(tf.shape(key)[-1], tf.float32)
+        attention_scores = attention_scores / tf.sqrt(d_k)
+        
+        # 應用 softmax
+        attention_weights = tf.nn.softmax(attention_scores, axis=-1)
+        
+        # 計算 context
+        context = tf.matmul(attention_weights, value)
+        
+        return context
+    
+    def get_config(self):
+        config = super(SelfAttention, self).get_config()
+        return config
+
+# 主要的手語辨識函數
 def start():
-    actions = np.array(['apply_for', 'invest', 'me', 'passbook', 'what'])
-
-    label_map = {label:num for num, label in enumerate(actions)}
-    print(label_map)
-    print(actions.shape[0])
-
-
-    def get_dataset(data_path_trans):
-        input_texts = []     
-        target_texts = []
-
-        input_characters = set()
-        target_characters = set()
-        with open(data_path_trans, 'r', encoding='utf-8') as f:
-            lines = f.read().split('\n')
-        for line in lines:
-            input_text, target_text= line.split('   ')
-            # 用tab作用序列的开始，用\n作为序列的结束
-            target_text = '\t' + target_text + '\n'
-
-            input_texts.append(input_text)
-            target_texts.append(target_text)
-            
-            for char in input_text:
-                if char not in input_characters:
-                    input_characters.add(char)
-            for char in target_text:
-                if char not in target_characters:
-                    target_characters.add(char)
-        return input_texts,target_texts,input_characters,target_characters
-
-
-    # data_path_trans = r'C:\Users\heng\Desktop\visual_recognition\Model\EngToChinese_service1_1029.txt'
-    data_path_trans = r"./Model/EngToChinese_service1_1029.txt"
-    input_texts,target_texts,input_characters,target_characters = get_dataset(data_path_trans)
-
-
-    input_characters = sorted(list(input_characters))
-    target_characters = sorted(list(target_characters))
-
-    num_encoder_tokens = len(input_characters)
-    num_decoder_tokens = len(target_characters)
-
-    max_encoder_seq_length = max([len(txt) for txt in input_texts])
-    max_decoder_seq_length = max([len(txt) for txt in target_texts])
-
-
-    input_token_index = dict(
-        [(char, i) for i, char in enumerate(input_characters)])
-    target_token_index = dict(
-        [(char, i) for i, char in enumerate(target_characters)])
-
-    reverse_target_char_index = dict(
-        (i, char) for char, i in target_token_index.items())
-
-
+    print("🚀 啟動手語辨識系統...")
+    
     from tensorflow.keras.models import load_model
-
-
-    new_model = load_model("./Model/j1_noise.keras")
-    new_model_order = load_model("./Model/model0529-20.h5")
+    
+    # 初始化變數
+    new_model = None
+    actions = None
+    sequence_length = 60
+    
+    print("📥 嘗試加載模型...")
+    
+    # 加載模型
+    try:
+        new_model = load_model("./Model/yu2_3da_atten_0820.keras", 
+                              custom_objects={'SelfAttention': SelfAttention}, 
+                              compile=False)
+        print("✅ 成功加載主模型 yu2_3da_atten_0820.keras")
+    except Exception as e:
+        print(f"❌ 加載主模型失敗: {e}")
+        try:
+            new_model = load_model("./Model/j1_0819_noise.keras", compile=False)
+            print("✅ 成功加載備用模型 j1_0819_noise.keras")
+        except Exception as e2:
+            print(f"❌ 加載備用模型失敗: {e2}")
+            try:
+                new_model = load_model("./Model/j1_noise.keras", compile=False)
+                print("✅ 成功加載舊備用模型 j1_noise.keras")
+            except Exception as e3:
+                print(f"❌ 所有模型加載都失敗: {e3}")
+                return
+    
+    # 檢查模型是否成功加載
+    if new_model is None:
+        print("❌ 無法加載任何模型，程式終止")
+        return
+    
+    print("✅ 模型加載成功！")
     new_model.summary()
-
+    
+    # 分析模型結構
+    try:
+        model_input_shape = new_model.input.shape
+        sequence_length = model_input_shape[1] if model_input_shape[1] is not None else 60
+        print(f"🔍 模型期望序列長度: {sequence_length}")
+        
+        model_output_shape = new_model.output.shape
+        num_classes = model_output_shape[-1]
+        print(f"🔍 模型輸出類別數: {num_classes}")
+        
+        # 根據模型輸出設定動作
+        if num_classes == 5:
+            actions = np.array(['apply_for', 'invest', 'me', 'passbook', 'what'])
+            print("🔍 使用5個動作")
+        elif num_classes == 12:
+            actions = np.array(['complete', 'apply_for', 'invest', 'cover_name', 'me', 'passbook', 'use', 'various', 'want', 'what', 'id_card', 'paper'])
+            print("🔍 使用12個動作")
+        elif num_classes == 14:
+            actions = np.array(['complete', 'apply_for', 'invest', 'cover_name', 'me', 'passbook', 'use', 'various', 'want', 'what', 'id_card', 'paper', 'action_13', 'action_14'])
+            print("🔍 使用14個動作（部分名稱需確認）")
+        else:
+            actions = np.array(['complete', 'apply_for', 'invest', 'cover_name', 'me', 'passbook', 'use', 'various', 'want', 'what', 'id_card', 'paper'])
+            print(f"⚠️ 未知類別數 {num_classes}，使用預設12個動作")
+    except Exception as e:
+        print(f"❌ 分析模型時發生錯誤: {e}")
+        sequence_length = 60
+        actions = np.array(['complete', 'apply_for', 'invest', 'cover_name', 'me', 'passbook', 'use', 'various', 'want', 'what', 'id_card', 'paper'])
+        print("🔍 使用預設設置：60幀，12個動作")
+    
+    # 建立標籤映射
+    label_map = {label: num for num, label in enumerate(actions)}
+    print(f"📋 動作標籤: {label_map}")
+    print(f"📊 總共 {actions.shape[0]} 個動作")
 
     import cv2
     import mediapipe as mp
     from collections import Counter
 
-    mp_holistic = mp.solutions.holistic # Holistic model
-    mp_drawing = mp.solutions.drawing_utils # Drawing utilities
+    mp_holistic = mp.solutions.holistic
+    mp_drawing = mp.solutions.drawing_utils
 
-
-    colors = [(245,117,16)] * len(actions)
+    colors = [(245, 117, 16)] * len(actions)
 
     # 在影像中繪製模型預測的機率分布條
     def prob_viz(res, actions, input_frame, colors):
         output_frame = input_frame.copy()
         for num, prob in enumerate(res):
-
-            cv2.rectangle(output_frame, (0,60+num*17), (int(prob*100), 90+num*17), colors[num], -1)
+            if num < len(colors):  # 防止索引超出範圍
+                cv2.rectangle(output_frame, (0, 60 + num * 17), (int(prob * 100), 90 + num * 17), colors[num], -1)
         return output_frame
-
 
     # 檢測影像中的關鍵點
     def mediapipe_detection(image, model):
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # Mediapipe 模型只接受 RGB 格式影像，因此需要轉換
-        image.flags.writeable = False # 禁止寫入，加速處理
-        results = model.process(image) # 返回檢測結果，包括手部、姿態等關鍵點資訊。
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image.flags.writeable = False
+        results = model.process(image)
         return results
 
-    # 在影像上繪製姿態、左手和右手的關鍵點連接線。
+    # 繪製關鍵點
     def draw_styled_landmarks(image, results):
-        # Draw pose connections 繪製人體姿態的骨架
         mp_drawing.draw_landmarks(
             image, results.pose_landmarks, mp_holistic.POSE_CONNECTIONS,
-            mp_drawing.DrawingSpec(color=(80,22,10), thickness=2, circle_radius=4), 
-            mp_drawing.DrawingSpec(color=(80,44,121), thickness=2, circle_radius=2)
+            mp_drawing.DrawingSpec(color=(80, 22, 10), thickness=2, circle_radius=4), 
+            mp_drawing.DrawingSpec(color=(80, 44, 121), thickness=2, circle_radius=2)
         )
-        # Draw left hand connections 繪製左手的關鍵點與連接線
         mp_drawing.draw_landmarks(
             image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
-            mp_drawing.DrawingSpec(color=(121,22,76), thickness=2, circle_radius=4), 
-            mp_drawing.DrawingSpec(color=(121,44,250), thickness=2, circle_radius=2)
+            mp_drawing.DrawingSpec(color=(121, 22, 76), thickness=2, circle_radius=4), 
+            mp_drawing.DrawingSpec(color=(121, 44, 250), thickness=2, circle_radius=2)
         ) 
-        # Draw right hand connections 繪製右手的關鍵點與連接線
         mp_drawing.draw_landmarks(
             image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS, 
-            mp_drawing.DrawingSpec(color=(245,117,66), thickness=2, circle_radius=4), 
-            mp_drawing.DrawingSpec(color=(245,66,230), thickness=2, circle_radius=2)
+            mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=4), 
+            mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
         ) 
 
- # 提取關鍵點座標，僅包括左手和右手（不包括臉部和姿態）
+    # 提取關鍵點座標
     def extract_keypoints_without_face(results):
         pose = np.array([[res.x, res.y, res.z, res.visibility] for res in results.pose_landmarks.landmark]).flatten() if results.pose_landmarks else np.zeros(33*4)
         lh = np.array([[res.x, res.y, res.z] for res in results.left_hand_landmarks.landmark]).flatten() if results.left_hand_landmarks else np.zeros(21*3)
         rh = np.array([[res.x, res.y, res.z] for res in results.right_hand_landmarks.landmark]).flatten() if results.right_hand_landmarks else np.zeros(21*3)
         return np.concatenate([lh, rh]) 
 
-    
-    def translate(model_opt):
-        # 用零初始化編碼器輸入，形狀是 (1, max_encoder_seq_length, num_encoder_tokens)
-        in_encoder = np.zeros((1, max_encoder_seq_length, num_encoder_tokens),dtype='float32')
-
-        # 將 model_opt（輸入句子）轉換為 one-hot 編碼，再重新加到 in_encoder
-        for t, char in enumerate(model_opt):
-            in_encoder[0, t, input_token_index[char]] = 1. # 在對應字符位置填入1，表示該字符
-        # 填充剩餘位置為空格字符的 one-hot 編碼
-        in_encoder[0, t + 1:, input_token_index[' ']] = 1.
-
-        # 用零初始化解碼器輸入，形狀是 (batch_size, max_decoder_seq_length, num_decoder_tokens)
-        in_decoder = np.zeros((len(in_encoder), max_decoder_seq_length, num_decoder_tokens),dtype='float32')
-        # 解碼器的第一個輸入是開始符號（"\t"）
-        in_decoder[:, 0, target_token_index["\t"]] = 1
-
-        # 生成 decoder 的 output # 預測每個解碼器時間步的輸出並將其作為下一時間步的輸入
-        for i in range(max_decoder_seq_length - 1):
-            predict = new_model_order.predict([in_encoder, in_decoder])
-            predict = predict.argmax(axis=-1)# 從預測結果中選擇概率最大的 token
-            predict_ = predict[:, i].ravel().tolist()
-            for j, x in enumerate(predict_):
-                in_decoder[j, i + 1, x] = 1 # 將每個預測出的 token 設為 decoder 下一個 timestamp 的輸入
-        
-        seq_index = 0 # 初始化解碼結果
-        decoded_sentence = "" # 解碼後的句子
-         # 選擇預測的序列中的第一個樣本（通常 batch_size=1）
-        output_seq = predict[seq_index, :].ravel().tolist()
-
-        # 把token轉換為字符
-        for x in output_seq:
-            if reverse_target_char_index[x] == "\n":
-                break
-            else:
-                decoded_sentence+=reverse_target_char_index[x] #將解碼的字符拼接成句子
-
-        return decoded_sentence
-
-    sequence = [] # 儲存最近 30 幀的關鍵點序列，作為模型輸入
-    sentence = [] # 儲存當前辨識出的完整手語句子
-    predictions = [] # 儲存最近模型預測的結果索引
-    threshold = 0.7 # 模型預測的機率閾值，低於此值的結果會被忽略
-    alarm_set = False # 標誌是否需要觸發翻譯（防止過於頻繁的翻譯）
-    trans_result = "" # 儲存翻譯後的結果
+    # 初始化變數
+    sequence = []
+    sentence = []
+    predictions = []
+    threshold = 0.7
+    alarm_set = False
+    trans_result = ""
+    last_updated_time = time.time()
 
     cap = cv2.VideoCapture(0)
     
     if not cap.isOpened():
         print("❌ 錯誤：無法打開攝影機！")
-        exit(1)
+        return
 
+    print("🎥 攝影機啟動成功，開始手語辨識...")
 
-    with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic: # 設定 MediaPipe 的 Model
+    with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic:
         while cap.isOpened():
-            ret, frame = cap.read() # cap.read(): 從攝像頭捕捉一個影像幀，返回幀的狀態 (ret) 和數據 (frame)
+            ret, frame = cap.read()
             if not ret:
-                break # 如果捕捉失敗 (ret=False)，退出循環
+                break
 
-            results = mediapipe_detection(frame, holistic) # 調用 mediapipe_detection 函數，對當前幀進行檢測，返回檢測結果 (results)
-            draw_styled_landmarks(frame, results) # 在影像上繪製姿態、左手和右手的關鍵點連接線。
+            results = mediapipe_detection(frame, holistic)
+            draw_styled_landmarks(frame, results)
             
-            keypoints = extract_keypoints_without_face(results) # 提取關鍵點座標，僅包括左手和右手（不包括臉部和姿態）
+            keypoints = extract_keypoints_without_face(results)
             if np.count_nonzero(keypoints) > 30:
-                sequence.append(keypoints) # 如果有效關鍵點數量超過 30，將其添加到 sequence 中。
-                sequence = sequence[-30:] # 僅保留最近 30 幀的數據。
+                sequence.append(keypoints)
+                sequence = sequence[-sequence_length:]
             
-            if len(sequence) == 30:
-                res = new_model.predict(np.expand_dims(sequence, axis=0))[0] # 當 sequence 的長度達到 30（滿足模型輸入要求），對序列進行推論，返回機率分布 (res)
-                if res[np.argmax(res)] > threshold: 
-                    predictions.append(np.argmax(res)) # 如果最高機率的分類超過 threshold，將其索引添加到 predictions
+            if len(sequence) == sequence_length:
+                try:
+                    res = new_model.predict(np.expand_dims(sequence, axis=0))[0]
+                    if res[np.argmax(res)] > threshold: 
+                        predictions.append(np.argmax(res))
 
-                
-            #3. Viz logic
-                if Counter(predictions[-10:]).most_common(1)[0][0]==np.argmax(res): # 使用 Counter 計算最近 10 個預測中出現次數最多的結果，與當前結果比較。  
-                    if len(sentence) > 0: # 如果 sentence 已有內容
-                        if actions[np.argmax(res)] != sentence[-1]: # 且當前預測的動作與最後一個動作不同
-                            sentence.append(actions[np.argmax(res)]) # 則添加新的動作到 Sentence。
-                            sequence = [] # 則清空 sequence
-                            last_updated_time = time.time() # 記錄當前時間作為 last_updated_time
-                            alarm_set = True # 表示翻譯觸發條件已滿足
-                    else:
-                        sentence.append(actions[np.argmax(res)]) # 如果 sentence 為空
-                        sequence = [] # 則清空 sequence
-                        last_updated_time = time.time() 
-                        alarm_set = True
+                    # 辨識邏輯
+                    try:
+                        most_common_predictions = Counter(predictions[-10:]).most_common(1)
+                        if most_common_predictions and most_common_predictions[0][0] == np.argmax(res):
+                            predicted_action_index = np.argmax(res)
+                            if predicted_action_index < len(actions):  # 確保索引在範圍內
+                                if len(sentence) > 0:
+                                    if actions[predicted_action_index] != sentence[-1]:
+                                        sentence.append(actions[predicted_action_index])
+                                        sequence = []
+                                        last_updated_time = time.time()
+                                        alarm_set = True
+                                else:
+                                    sentence.append(actions[predicted_action_index])
+                                    sequence = []
+                                    last_updated_time = time.time()
+                                    alarm_set = True
+                    except (IndexError, ValueError) as e:
+                        print(f"⚠️ 預測處理警告: {e}")
+                        pass
 
-                if len(sentence) > 5: 
-                    sentence = sentence[-5:] # 把 sentence 長度限制在 5，僅保留最近的 5 個動作
+                    if len(sentence) > 5: 
+                        sentence = sentence[-5:]
 
-                # Viz probabilities
-                frame = prob_viz(res, actions, frame, colors) # 將模型的預測機率 (res) 視覺化，繪製條形圖到影像 frame 上
+                    # 視覺化機率
+                    frame = prob_viz(res, actions, frame, colors)
+                except Exception as e:
+                    print(f"❌ 模型預測時發生錯誤: {e}")
+                    continue
                 
             current_time = time.time()  
-            if alarm_set and current_time - last_updated_time >= 10: # 「需要翻譯」且「時間過10秒」，將 sentence 放入下一個模型進行預測
-                trans_result = translate(' '.join(sentence)) # 將 sentence 拼接成一個句子，傳入翻譯函數 translate，生成翻譯結果 trans_result
-                print('---result---', trans_result)
+            if alarm_set and current_time - last_updated_time >= 3:
+                try:
+                    sentence_text = ' '.join(sentence)
+                    print(f'---sentence---: {sentence}')
+                    print(f'---sentence_text---: {sentence_text}')
+                    
+                    trans_result = sentence_text
+                    print(f'---final result---: {trans_result}')
 
-                url = 'http://localhost:5000/handlanRes'
-                data = {'result': trans_result}  # 將 trans_result 作為結果放入字典中
-                response = requests.post(url, data=data) # 將結果發送到後端的 /handlanRes 路由，作為字典 data 的 POST 請求
-                #return data # Problem: 會導致 start 函數終止
-
-                alarm_set = False # 設為不需翻譯，避免重複翻譯
-                sequence = [] # 清空 sequence 資料
-                sentence = [] # 清空 sentence 資料
+                    if trans_result:
+                        url = 'http://localhost:5000/handlanRes'
+                        data = {'result': trans_result}
+                        response = requests.post(url, data=data)
+                        print(f'---response status---: {response.status_code}')
+                    
+                    alarm_set = False
+                    sequence = []
+                    sentence = []
+                except Exception as e:
+                    print(f'❌ 處理結果時發生錯誤: {e}')
+                    alarm_set = False
+                    sequence = []
+                    sentence = []
                 
-            img = np.zeros((40,640,3), dtype='uint8') # 建立一個全黑的空白影像，用於顯示翻譯結果文字。
-            fontpath = 'NotoSerifCJKtc-Regular.otf' 
-            font = ImageFont.truetype(fontpath, 20) # 加載字型文件並設置字型大小
-            imgPil = Image.fromarray(img) # 將 NumPy 陣列 img 轉換為 PIL (Python Imaging Library) 格式的影像
-            draw = ImageDraw.Draw(imgPil) # 使用 ImageDraw 在影像上繪製翻譯結果文字
-            draw.text((0, 0), trans_result, fill=(255, 255, 255), font=font) # 參數：(文字繪製的起始座標，左上角為 (0, 0), 要顯示的翻譯結果, 文字顏色為白色 (RGB), 指定的字型對象)
-            img = np.array(imgPil) # 將繪製了文字的 PIL 影像轉回 NumPy 陣列格式，因為 OpenCV 的後續處理需要 NumPy 格式的影像，img 現在是一個包含翻譯結果文字的 NumPy 陣列影像
+            img = np.zeros((40, 640, 3), dtype='uint8')
             
-            cv2.rectangle(frame, (0,0), (640, 40), (245, 117, 16), -1) # 在主影像 frame 的頂部繪製一個橙色矩形背景。
-            cv2.putText(frame, ' '.join(sentence), (3,30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA) # 在影像的矩形背景上顯示當前的 sentence（辨識出的手語動作）。
-            if frame.shape[1] != img.shape[1]: # 確保 frame 和 img 的寬度一致
-                # Resize img to have the same number of columns as frame
+            try:
+                fontpath = 'NotoSerifCJKtc-Regular.otf' 
+                font = ImageFont.truetype(fontpath, 20)
+                imgPil = Image.fromarray(img)
+                draw = ImageDraw.Draw(imgPil)
+                draw.text((0, 0), trans_result, fill=(255, 255, 255), font=font)
+                img = np.array(imgPil)
+            except Exception as e:
+                print(f"⚠️ 字型加載警告: {e}")
+                cv2.putText(img, trans_result, (5, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
+            
+            cv2.rectangle(frame, (0, 0), (640, 40), (245, 117, 16), -1)
+            cv2.putText(frame, ' '.join(sentence), (3, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
+            
+            if frame.shape[1] != img.shape[1]:
                 img = cv2.resize(img, (frame.shape[1], img.shape[0]))
 
-            # Check if they have the same type
             if frame.dtype != img.dtype:
-                # Convert img to the same type as frame
                 img = img.astype(frame.dtype)
+            
             outputframe = cv2.vconcat([frame, img])
-            # cv2.imshow('SignLanguage', outputframe)
             ret, buffer = cv2.imencode('.jpg', outputframe)
             frame = buffer.tobytes()
             yield (b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
-        # 這段程式碼的作用是提供用戶一個結束程序的機會（按下 x），然後釋放攝像頭和圖形資源，確保程序正常退出並避免資源洩露。
             if cv2.waitKey(10) & 0xFF == ord('x'):
                 break
+        
         cap.release()
         cv2.destroyAllWindows()
-    
-

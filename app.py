@@ -1,12 +1,12 @@
 import fitz  # PyMuPDF
-from flask import Flask, request, send_file,Response
+from flask import Flask, request, send_file, Response
 from werkzeug.utils import secure_filename
 import os
 from flask_cors import CORS
 import numpy as np  # 引入 NumPy 模組
 from PIL import Image
 import io
-from Train_Model_hands2 import start
+from Train_Model_hands2 import start  # 注意：改回正確的檔案名
 import threading
 
 
@@ -16,6 +16,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 outputFrame = None
 lock = threading.Lock()
 trans_res = ""
+
 def process_pdf(input_path, output_path, type, level):
     # 打開PDF
     pdf_document = fitz.open(input_path)
@@ -52,7 +53,6 @@ def process_pdf(input_path, output_path, type, level):
             img_array[..., 0] = np.minimum(255, img_array[..., 0] * factor) # R channel
             img_array[..., 1] = np.minimum(255, img_array[..., 1] * factor) # G channel
         
-
         # 修改後的轉回PIL
         img = Image.fromarray(img_array)
 
@@ -68,17 +68,21 @@ def process_pdf(input_path, output_path, type, level):
     pdf_document.close()
 
 
-
-
 @app.route('/handlanRes', methods=['POST'])
 def handle_result():
-    if request.method == 'POST':
-        data = request.form  
-        result = data.get('result')  
-        global trans_res
-        trans_res = result
-        print('Received result:', result)
-
+    try:
+        if request.method == 'POST':
+            data = request.form  
+            result = data.get('result')  
+            global trans_res
+            trans_res = result
+            print('Received result:', result)
+            
+            # 重要：必須返回一個有效的回應
+            return {"status": "success", "message": "Result received successfully", "result": result}, 200
+    except Exception as e:
+        print(f"Error in handle_result: {e}")
+        return {"status": "error", "message": str(e)}, 500
 
 
 @app.route('/process_pdf', methods=['POST'])
@@ -92,41 +96,27 @@ def process_pdf_route():
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'processed_' + filename)
     file.save(input_path)
 
-
     process_pdf(input_path, output_path, type, level)
 
     return send_file(output_path, mimetype='application/pdf')
-"""
-@app.route('/video_feed')
-def video_feed():
-    try:
-        print("TEST")
-        return Response(start(),
-                        mimetype='multipart/x-mixed-replace; boundary=frame')
-    except Exception as e:
-        print(f"Error in video_feed: {e}")
-        return "Error in video_feed", 403
-"""
 
-lock = threading.Lock()
 
 @app.route('/video_feed')
 def video_feed():
     try:
-        with lock:
-            return Response(start(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        return Response(start(), mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
         print(f"Error in video_feed: {e}")
         return {"error": str(e)}, 500
 
 
-    
 @app.route('/getRes', methods=['GET'])
 def getRes():
     if trans_res:
         return {"msg": trans_res}
     else:
         return {"msg": "No data available"}
+
 
 @app.route('/')
 def home():
@@ -136,4 +126,3 @@ def home():
 if __name__ == '__main__':
     app.config['UPLOAD_FOLDER'] = 'uploads'
     app.run(host="0.0.0.0", port=5000)
-
