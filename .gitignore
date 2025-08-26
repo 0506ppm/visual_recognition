@@ -17,6 +17,7 @@ rec
 *.png
 
 # 忽略特定檔案與資料夾
+Model/
 AI學習成果v2 (1).xlsx
 blend_words/
 hand-gesture-recognition-mediapipe/
